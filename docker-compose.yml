@@ -1,0 +1,15 @@
+services:
+  lifescale:
+    build: .
+    container_name: lifescale
+    ports:
+      - "3001:3001"
+    volumes:
+      - lifescale-data:/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATA_DIR=/data
+
+volumes:
+  lifescale-data:
