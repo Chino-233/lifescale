@@ -1,22 +1,15 @@
 import { createServer } from "node:http";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createJsonStore } from "./jsonStore.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const distDir = path.join(rootDir, "dist");
-const dataDir = process.env.DATA_DIR
-  ? path.resolve(process.env.DATA_DIR)
-  : path.join(rootDir, ".data");
-const dataFile = path.join(dataDir, "lifescale-data.json");
 const port = Number(process.env.PORT ?? 3001);
-
-const emptyData = {
-  version: 1,
-  projects: [],
-};
+const store = createJsonStore(rootDir);
 
 const mimeTypes = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -29,10 +22,6 @@ const mimeTypes = new Map([
   [".jpeg", "image/jpeg"],
   [".ico", "image/x-icon"],
 ]);
-
-async function ensureDataDir() {
-  await mkdir(dataDir, { recursive: true });
-}
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -56,42 +45,18 @@ async function readJsonBody(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf-8"));
 }
 
-function normalizeData(value) {
-  if (!value || value.version !== 1 || !Array.isArray(value.projects)) {
-    throw new Error("Invalid LifeScale data");
-  }
-
-  return {
-    version: 1,
-    projects: value.projects,
-  };
-}
-
-async function loadData() {
-  await ensureDataDir();
-
-  try {
-    const raw = await readFile(dataFile, "utf-8");
-    return normalizeData(JSON.parse(raw));
-  } catch (error) {
-    if (error && error.code === "ENOENT") {
-      await saveData(emptyData);
-      return emptyData;
-    }
-
-    throw error;
-  }
-}
-
-async function saveData(data) {
-  await ensureDataDir();
-  await writeFile(dataFile, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
-  return data;
-}
-
 async function handleApi(request, response, url) {
   if (url.pathname === "/api/health") {
-    sendJson(response, 200, { ok: true, name: "lifescale" });
+    sendJson(response, 200, {
+      ok: true,
+      name: "lifescale",
+      storage: await store.getStorageInfo(),
+    });
+    return true;
+  }
+
+  if (url.pathname === "/api/storage-info") {
+    sendJson(response, 200, await store.getStorageInfo());
     return true;
   }
 
@@ -101,18 +66,18 @@ async function handleApi(request, response, url) {
 
   try {
     if (request.method === "GET") {
-      sendJson(response, 200, await loadData());
+      sendJson(response, 200, await store.loadData());
       return true;
     }
 
     if (request.method === "PUT") {
-      const body = normalizeData(await readJsonBody(request));
-      sendJson(response, 200, await saveData(body));
+      const body = store.normalizeData(await readJsonBody(request));
+      sendJson(response, 200, await store.saveData(body));
       return true;
     }
 
     if (request.method === "DELETE") {
-      sendJson(response, 200, await saveData(emptyData));
+      sendJson(response, 200, await store.saveData(store.emptyData));
       return true;
     }
 
@@ -177,5 +142,6 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, () => {
   console.log(`LifeScale server listening on http://localhost:${port}`);
-  console.log(`Data file: ${dataFile}`);
+  console.log(`Data file: ${store.dataFile}`);
+  console.log(`Backup file: ${store.backupFile}`);
 });

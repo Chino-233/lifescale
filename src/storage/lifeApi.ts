@@ -1,6 +1,15 @@
 import type { StoredLifeData } from "./lifeStorage";
 
 const API_PATH = "/api/life-data";
+const STORAGE_INFO_PATH = "/api/storage-info";
+
+export type BackendStorageInfo = {
+  dataFile: string;
+  backupFile: string;
+  exists: boolean;
+  size: number;
+  modifiedAt: string | null;
+};
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -33,4 +42,8 @@ export function clearLifeDataOnServer(): Promise<StoredLifeData> {
   return request<StoredLifeData>(API_PATH, {
     method: "DELETE",
   });
+}
+
+export function loadBackendStorageInfo(): Promise<BackendStorageInfo> {
+  return request<BackendStorageInfo>(STORAGE_INFO_PATH);
 }

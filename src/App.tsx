@@ -29,7 +29,6 @@ import type {
   LifeProject,
   LifeStage,
   Milestone,
-  ProgressMetric,
   StageStatus,
 } from "./types/life";
 import { formatDuration } from "./utils/formatDuration";
@@ -76,14 +75,11 @@ type MilestoneFormValue = {
 };
 
 type AppPage = "overview" | "scale" | "stages" | "data";
+type ScaleViewMode = "full" | "now";
 type ProjectRange = {
   startMs: number;
   endMs: number;
 };
-
-function percent(value: number, digits = 1): string {
-  return `${clamp(value, 0, 100).toFixed(digits)}%`;
-}
 
 function inputDate(date: Date): string {
   return format(date, "yyyy-MM-dd");
@@ -99,6 +95,28 @@ function compactDate(dateString: string): string {
 
 function formatMsDate(ms: number): string {
   return format(new Date(ms), "yyyy-MM-dd");
+}
+
+function segmentRadiusClass({
+  clipLeft,
+  clipRight,
+}: {
+  clipLeft: boolean;
+  clipRight: boolean;
+}): string {
+  if (clipLeft && clipRight) {
+    return "rounded-none";
+  }
+
+  if (clipLeft) {
+    return "rounded-r-full rounded-l-none";
+  }
+
+  if (clipRight) {
+    return "rounded-l-full rounded-r-none";
+  }
+
+  return "rounded-full";
 }
 
 function getProjectRange(project: LifeProject): ProjectRange | null {
@@ -223,13 +241,17 @@ function TextArea({
 function ObservationControl({
   project,
   actualNow,
-  observedMs,
-  onChange,
+  scaleViewMode,
+  onScaleViewModeChange,
+  showOverviewScale,
+  onToggleOverviewScale,
 }: {
   project: LifeProject;
   actualNow: Date;
-  observedMs: number | null;
-  onChange: (value: number | null) => void;
+  scaleViewMode: ScaleViewMode;
+  onScaleViewModeChange: (value: ScaleViewMode) => void;
+  showOverviewScale: boolean;
+  onToggleOverviewScale: (value: boolean) => void;
 }) {
   const range = getProjectRange(project);
 
@@ -237,96 +259,78 @@ function ObservationControl({
     return null;
   }
 
-  const activeMs = observedMs ?? actualNow.getTime();
-  const sliderValue = clamp(activeMs, range.startMs, range.endMs - DAY_MS);
-  const isManual = observedMs !== null;
+  const visibleEndMs =
+    scaleViewMode === "now"
+      ? clamp(actualNow.getTime(), range.startMs + DAY_MS, range.endMs)
+      : range.endMs;
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-slate-950">观察日期</h2>
+          <h2 className="text-base font-semibold text-slate-950">总刻度</h2>
           <p className="mt-1 text-sm text-slate-500">
-            拖动滑杆可以把「现在」移动到任意日期，用来回看或预演阶段进度。
+            可以单独控制整条时间轴顶部总刻度是否显示，下面的阶段结构会保留。
           </p>
         </div>
         <div className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700">
-          {formatMsDate(sliderValue)}
+          {inputDate(actualNow)}
         </div>
       </div>
-      <div className="mt-4 grid gap-3">
-        <input
-          aria-label="拖动观察日期"
-          className="w-full accent-slate-900"
-          max={range.endMs - DAY_MS}
-          min={range.startMs}
-          step={DAY_MS}
-          type="range"
-          value={sliderValue}
-          onChange={(event) => onChange(Number(event.target.value))}
-        />
-        <div className="flex items-center justify-between text-xs text-slate-500">
-          <span>{formatMsDate(range.startMs)}</span>
-          <span>{formatMsDate(range.endMs - DAY_MS)}</span>
+      <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-slate-600">
+            可见范围：{formatMsDate(range.startMs)} - {formatMsDate(visibleEndMs - DAY_MS)}
+          </div>
+          <div className="inline-flex rounded-md bg-white p-1 ring-1 ring-slate-200">
+            <button
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                scaleViewMode === "full"
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+              type="button"
+              onClick={() => onScaleViewModeChange("full")}
+            >
+              完整模式
+            </button>
+            <button
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                scaleViewMode === "now"
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+              type="button"
+              onClick={() => onScaleViewModeChange("now")}
+            >
+              现在模式
+            </button>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => onChange(actualNow.getTime())}>
-            <Clock3 size={16} />
-            跳到今天
-          </Button>
-          <Button disabled={!isManual} variant="ghost" onClick={() => onChange(null)}>
-            使用实时日期
-          </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-500">
+            现在模式会把“现在”之后的内容全部隐藏，当前时间会贴到最右侧。
+          </p>
+          <label className="inline-flex cursor-pointer items-center gap-3 text-sm font-medium text-slate-700">
+            <button
+              aria-pressed={showOverviewScale}
+              className={`relative h-7 w-12 rounded-full transition ${
+                showOverviewScale ? "bg-slate-900" : "bg-slate-300"
+              }`}
+              type="button"
+              onClick={() => onToggleOverviewScale(!showOverviewScale)}
+            >
+              <span
+                className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${
+                  showOverviewScale ? "left-6" : "left-1"
+                }`}
+              />
+            </button>
+            {showOverviewScale ? "显示总刻度" : "隐藏总刻度"}
+          </label>
         </div>
       </div>
     </section>
-  );
-}
-
-function ProgressBar({
-  label,
-  metric,
-  tone,
-}: {
-  label: string;
-  metric: ProgressMetric;
-  tone: "natural" | "effective";
-}) {
-  const color = tone === "natural" ? "bg-blue-600" : "bg-emerald-600";
-  const value = clamp(metric.percentage, 0, 100);
-
-  return (
-    <div className="grid gap-2">
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="font-medium text-slate-700">{label}</span>
-        <span className="tabular-nums text-slate-600">{percent(value)}</span>
-      </div>
-      <div
-        aria-label={label}
-        aria-valuemax={100}
-        aria-valuemin={0}
-        aria-valuenow={Number(value.toFixed(1))}
-        className="h-3 overflow-hidden rounded-full bg-slate-200"
-        role="progressbar"
-      >
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function DualProgressBar({
-  natural,
-  effective,
-}: {
-  natural: ProgressMetric;
-  effective: ProgressMetric;
-}) {
-  return (
-    <div className="grid gap-4">
-      <ProgressBar label="日历进度（未扣除）" metric={natural} tone="natural" />
-      <ProgressBar label="净进度（扣除暂停）" metric={effective} tone="effective" />
-    </div>
   );
 }
 
@@ -402,41 +406,6 @@ function PageNav({
   );
 }
 
-function ProgressExplanation() {
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-xl font-semibold text-slate-950">概念说明</h2>
-      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-        <h3 className="font-semibold text-slate-950">时间轴和阶段</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
-          一个人的一生当然可以是一条固定时间轴。这里的「时间轴」是一个容器：
-          你可以只建一条「我的一生」，也可以另外建「东京生活」「职业转型」这种专题时间轴。
-          「阶段」就是这条时间轴里面的一段时间，比如大学、第一份工作、恢复期。
-        </p>
-      </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <div className="rounded-md border border-blue-100 bg-blue-50 p-4">
-          <h3 className="font-semibold text-blue-950">日历进度（未扣除）</h3>
-          <p className="mt-2 text-sm leading-6 text-blue-900">
-            只看日历时间。从阶段开始到现在过了多久，占整个阶段日期范围的百分比。
-            它不管中间有没有休息、等待、恢复或暂停。
-          </p>
-        </div>
-        <div className="rounded-md border border-emerald-100 bg-emerald-50 p-4">
-          <h3 className="font-semibold text-emerald-950">净进度（扣除暂停）</h3>
-          <p className="mt-2 text-sm leading-6 text-emerald-900">
-            先把你标记为「不计入净进度」的时间段扣掉，再计算已经走过多少。
-            它更像你主动定义后的阶段进度。
-          </p>
-        </div>
-      </div>
-      <p className="mt-4 text-sm text-slate-500">
-        举例：一个 100 天阶段已经过了 50 天，其中 10 天被你标记为暂停。
-        日历进度是 50%，净进度是 40 / 90，也就是约 44.4%。
-      </p>
-    </section>
-  );
-}
 
 function ProjectForm({
   initialValue,
@@ -725,7 +694,7 @@ function ExcludedPeriodForm({
             }))
           }
         />
-        这段时间不会计入净进度
+        这段时间会在时间轴上标记为排除
       </label>
       {willClip && (
         <p className="text-sm text-amber-700">
@@ -817,7 +786,13 @@ function MilestoneForm({
   );
 }
 
-function Timeline({ stage, now }: { stage: LifeStage; now: Date }) {
+function Timeline({
+  stage,
+  now,
+}: {
+  stage: LifeStage;
+  now: Date;
+}) {
   const stageInterval = toInterval(stage.startDate, stage.endDate);
 
   if (!stageInterval) {
@@ -942,7 +917,17 @@ function Timeline({ stage, now }: { stage: LifeStage; now: Date }) {
   );
 }
 
-function ProjectLongScale({ project, now }: { project: LifeProject; now: Date }) {
+function ProjectLongScale({
+  project,
+  now,
+  scaleViewMode,
+  showOverviewScale,
+}: {
+  project: LifeProject;
+  now: Date;
+  scaleViewMode: ScaleViewMode;
+  showOverviewScale: boolean;
+}) {
   const stageRows = project.stages
     .map((stage) => ({
       stage,
@@ -965,8 +950,31 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
     );
   }
 
-  const startMs = Math.min(...stageRows.map((row) => row.interval.startMs));
-  const endMs = Math.max(...stageRows.map((row) => row.interval.endMs));
+  const absoluteStartMs = Math.min(...stageRows.map((row) => row.interval.startMs));
+  const absoluteEndMs = Math.max(...stageRows.map((row) => row.interval.endMs));
+  const visibleRange: TimeInterval = {
+    startMs: absoluteStartMs,
+    endMs:
+      scaleViewMode === "now"
+        ? clamp(now.getTime(), absoluteStartMs + DAY_MS, absoluteEndMs)
+        : absoluteEndMs,
+  };
+  const visibleStageRows = stageRows
+    .map((row) => ({
+      ...row,
+      visibleInterval: clipInterval(row.interval, visibleRange),
+    }))
+    .filter(
+      (
+        row
+      ): row is {
+        stage: LifeStage;
+        interval: TimeInterval;
+        visibleInterval: TimeInterval;
+      } => row.visibleInterval !== null
+    );
+  const startMs = visibleRange.startMs;
+  const endMs = visibleRange.endMs;
   const totalDays = Math.max(1, Math.ceil((endMs - startMs) / DAY_MS));
   const useYearTicks = totalDays > 1100;
   const ticks: Date[] = [];
@@ -993,11 +1001,24 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
   }
 
   function percentFromMs(ms: number): number {
-    return clamp(((ms - startMs) / (endMs - startMs)) * 100, 0, 100);
+    const span = Math.max(1, endMs - startMs);
+    return clamp(((ms - startMs) / span) * 100, 0, 100);
   }
 
   const nowPercent = percentFromMs(now.getTime());
-  const showNow = now.getTime() >= startMs && now.getTime() <= endMs;
+  const nowWithinProject = now.getTime() >= startMs && now.getTime() <= endMs;
+  const projectEndedBeforeNow = now.getTime() > absoluteEndMs;
+  const showRangeMarker = scaleViewMode === "now" || nowWithinProject;
+  const rangeMarkerPercent = scaleViewMode === "now" ? 100 : nowPercent;
+  const rangeMarkerLabel =
+    scaleViewMode === "now"
+      ? projectEndedBeforeNow
+        ? "已结束"
+        : "现在"
+      : "现在";
+  const rangeMarkerAlignRight = rangeMarkerPercent > 84;
+  const rangeMarkerTitle =
+    scaleViewMode === "now" && projectEndedBeforeNow ? "时间轴最终日期" : "当前时间";
   const visibleTicks = ticks.filter((_, index) => {
     if (ticks.length <= 9) {
       return true;
@@ -1013,7 +1034,7 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
         <div>
           <h2 className="text-xl font-semibold text-slate-950">整条时间轴</h2>
           <p className="mt-1 text-sm text-slate-500">
-            整体时间会压缩到当前页面宽度；阶段名称、起点和终点固定显示在左侧。
+            总刻度和每个阶段共用同一套时间坐标；颜色块代表阶段区间，实心部分代表该阶段已经走到哪里。
           </p>
         </div>
         <div className="text-sm text-slate-500">
@@ -1022,69 +1043,86 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3">
-        <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[220px_1fr]">
-          <div>
-            <p className="text-sm font-semibold text-slate-900">时间轴总刻度</p>
-            <p className="mt-1 text-xs text-slate-500">{totalDays} 天</p>
-          </div>
-          <div className="relative h-20">
-            <div className="absolute inset-x-0 top-9 h-3 rounded-full bg-slate-200" />
-            {visibleTicks.map((tick) => {
-              const left = percentFromMs(tick.getTime());
-              const alignRight = left > 88;
-              return (
-                <div
-                  key={tick.toISOString()}
-                  className="absolute top-3 h-12 border-l border-slate-300"
-                  style={{ left: `${left}%` }}
-                >
-                  <span
-                    className={`absolute top-0 whitespace-nowrap text-xs text-slate-500 ${
-                      alignRight ? "right-1" : "left-1"
-                    }`}
-                  >
-                    {format(tick, useYearTicks ? "yyyy" : "yyyy.MM")}
-                  </span>
-                </div>
-              );
-            })}
-            {showNow && (
-              <div
-                className="absolute top-0 z-10 h-16 border-l-2 border-red-600"
-                style={{ left: `${nowPercent}%` }}
-              >
-                <span className="absolute left-2 top-0 whitespace-nowrap rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white">
-                  现在
-                </span>
-              </div>
-            )}
-            <div className="absolute inset-x-0 bottom-0 flex justify-between text-xs text-slate-500">
-              <span>{format(new Date(startMs), "yyyy.MM.dd")}</span>
-              <span>{format(new Date(endMs - DAY_MS), "yyyy.MM.dd")}</span>
-            </div>
-          </div>
-        </div>
-
+      <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
         <div className="grid gap-3">
-          {stageRows.map(({ stage, interval }) => {
-            const left = percentFromMs(interval.startMs);
-            const right = percentFromMs(interval.endMs);
+          {showOverviewScale && (
+            <div className="grid gap-3 border-b border-slate-200 pb-4 md:grid-cols-[220px_1fr]">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">总刻度</p>
+                <p className="mt-1 text-xs text-slate-500">{totalDays} 天</p>
+              </div>
+              <div className="relative h-20">
+                <div className="absolute inset-x-0 top-9 h-3 rounded-full bg-slate-200" />
+                {visibleTicks.map((tick) => {
+                  const left = percentFromMs(tick.getTime());
+                  const alignRight = left > 88;
+                  return (
+                    <div
+                      key={tick.toISOString()}
+                      className="absolute top-3 h-12 border-l border-slate-300"
+                      style={{ left: `${left}%` }}
+                    >
+                      <span
+                        className={`absolute top-0 whitespace-nowrap text-xs text-slate-500 ${
+                          alignRight ? "right-1" : "left-1"
+                        }`}
+                      >
+                        {format(tick, useYearTicks ? "yyyy" : "yyyy.MM")}
+                      </span>
+                    </div>
+                  );
+                })}
+                {showRangeMarker && (
+                  <div
+                    className="absolute top-0 z-10 h-16 border-l-2 border-red-600"
+                    style={{ left: `${rangeMarkerPercent}%` }}
+                    title={rangeMarkerTitle}
+                  >
+                    <span
+                      className={`absolute top-0 whitespace-nowrap rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white ${
+                        rangeMarkerAlignRight ? "right-2" : "left-2"
+                      }`}
+                    >
+                      {rangeMarkerLabel}
+                    </span>
+                  </div>
+                )}
+                <div className="absolute inset-x-0 bottom-0 flex justify-between text-xs text-slate-500">
+                  <span>{format(new Date(startMs), "yyyy.MM.dd")}</span>
+                  <span>{format(new Date(endMs - DAY_MS), "yyyy.MM.dd")}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {visibleStageRows.map(({ stage, interval, visibleInterval }) => {
+            const left = percentFromMs(visibleInterval.startMs);
+            const right = percentFromMs(visibleInterval.endMs);
             const width = Math.max(1, right - left);
+            const clipsLeft = visibleInterval.startMs > interval.startMs;
+            const clipsRight = visibleInterval.endMs < interval.endMs;
+            const stageRadiusClass = segmentRadiusClass({
+              clipLeft: clipsLeft,
+              clipRight: clipsRight,
+            });
             const stageProgress = computeStageProgress(stage, now);
+            const elapsedWidth = Math.max(
+              0,
+              (width * clamp(stageProgress.natural.percentage, 0, 100)) / 100
+            );
             const activeExclusions = mergeIntervals(
               stage.excludedPeriods
                 .filter((period) => period.countAsExcluded)
                 .map((period) => toInterval(period.startDate, period.endDate))
                 .filter((excluded): excluded is TimeInterval => excluded !== null)
-                .map((excluded) => clipInterval(excluded, interval))
+                .map((excluded) => clipInterval(excluded, visibleInterval))
                 .filter((excluded): excluded is TimeInterval => excluded !== null)
             );
 
             return (
               <div
                 key={stage.id}
-                className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-[220px_1fr]"
+                className="grid gap-3 rounded-lg bg-white p-4 md:grid-cols-[220px_1fr]"
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -1103,42 +1141,79 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
                   </p>
                 </div>
 
-                <div className="relative h-20">
-                  <div className="absolute inset-x-0 top-8 h-6 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="absolute inset-y-0 rounded-full shadow-sm ring-1 ring-black/5"
-                      style={{
-                        left: `${left}%`,
-                        width: `${width}%`,
-                        backgroundColor: stage.color ?? "#2563eb",
-                      }}
-                      title={`${stage.name}: ${stage.startDate} 至 ${stage.endDate}`}
-                    />
-                    {activeExclusions.map((excluded) => {
-                      const excludedLeft = percentFromMs(excluded.startMs);
-                      const excludedRight = percentFromMs(excluded.endMs);
-                      return (
-                        <div
-                          key={`${excluded.startMs}-${excluded.endMs}`}
-                          className="hatched absolute inset-y-0 ring-1 ring-slate-300"
-                          style={{
-                            left: `${excludedLeft}%`,
-                            width: `${Math.max(1, excludedRight - excludedLeft)}%`,
-                          }}
-                          title="排除时间段"
-                        />
-                      );
-                    })}
+                <div className="relative h-24">
+                  <div className="absolute inset-x-0 top-0 h-16">
+                    {visibleTicks.map((tick) => (
+                      <div
+                        key={`${stage.id}-${tick.toISOString()}`}
+                        className="absolute inset-y-0 border-l border-slate-200"
+                        style={{ left: `${percentFromMs(tick.getTime())}%` }}
+                      />
+                    ))}
                   </div>
-                  {showNow && (
+                  <div className="absolute inset-x-0 top-9 h-6 rounded-full bg-slate-100" />
+                  <div
+                    className={`absolute top-9 h-6 ring-1 ring-black/5 ${stageRadiusClass}`}
+                    style={{
+                      left: `${left}%`,
+                      width: `${width}%`,
+                      backgroundColor: `${stage.color ?? "#2563eb"}22`,
+                    }}
+                    title={`${stage.name}: ${stage.startDate} 至 ${stage.endDate}`}
+                  />
+                  <div
+                    className={`absolute top-9 h-6 shadow-sm ${stageRadiusClass}`}
+                    style={{
+                      left: `${left}%`,
+                      width: `${elapsedWidth}%`,
+                      backgroundColor: stage.color ?? "#2563eb",
+                    }}
+                    title={`${stage.name} 已经过的时间`}
+                  />
+                  {activeExclusions.map((excluded) => {
+                    const excludedLeft = percentFromMs(excluded.startMs);
+                    const excludedRight = percentFromMs(excluded.endMs);
+                    const exclusionRadiusClass = segmentRadiusClass({
+                      clipLeft: excluded.startMs > interval.startMs,
+                      clipRight: excluded.endMs < interval.endMs,
+                    });
+                    return (
+                      <div
+                        key={`${excluded.startMs}-${excluded.endMs}`}
+                        className={`hatched absolute top-9 h-6 ring-1 ring-slate-300 ${exclusionRadiusClass}`}
+                        style={{
+                          left: `${excludedLeft}%`,
+                          width: `${Math.max(1, excludedRight - excludedLeft)}%`,
+                        }}
+                        title="排除时间段"
+                      />
+                    );
+                  })}
+                  {showRangeMarker && (
                     <div
                       className="absolute top-1 z-10 h-16 border-l-2 border-red-600"
-                      style={{ left: `${nowPercent}%` }}
-                      title="当前时间"
-                    />
+                      style={{ left: `${rangeMarkerPercent}%` }}
+                      title={rangeMarkerTitle}
+                    >
+                      {rangeMarkerPercent >= left && rangeMarkerPercent <= right && (
+                        <span
+                          className={`absolute top-0 whitespace-nowrap rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white ${
+                            rangeMarkerAlignRight ? "right-2" : "left-2"
+                          }`}
+                        >
+                          {rangeMarkerLabel}
+                        </span>
+                      )}
+                    </div>
                   )}
                   {stage.milestones.map((milestone) => {
-                    const left = percentFromMs(parseLocalDate(milestone.date).getTime());
+                    const milestoneMs = parseLocalDate(milestone.date).getTime();
+
+                    if (milestoneMs < startMs || milestoneMs > endMs) {
+                      return null;
+                    }
+
+                    const left = percentFromMs(milestoneMs);
                     const alignRight = left > 78;
                     return (
                       <div
@@ -1157,10 +1232,12 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
                       </div>
                     );
                   })}
-                  <div className="absolute inset-x-0 bottom-0 flex justify-between text-xs text-slate-500">
-                    <span>{compactDate(stage.startDate)}</span>
-                    <span>{compactDate(stage.endDate)}</span>
-                  </div>
+                  <p className="absolute left-0 bottom-0 text-xs text-slate-500">
+                    {compactDate(stage.startDate)}
+                  </p>
+                  <p className="absolute right-0 bottom-0 text-xs text-slate-500">
+                    {compactDate(stage.endDate)}
+                  </p>
                 </div>
               </div>
             );
@@ -1241,10 +1318,9 @@ function ProjectList({
                   <p className="text-sm text-slate-600">
                     当前阶段：{activeStage?.name ?? "暂无进行中的阶段"}
                   </p>
-                  <DualProgressBar
-                    natural={progress.natural}
-                    effective={progress.effective}
-                  />
+                  <p className="text-sm text-slate-600">
+                    总时长：{formatDuration(progress.natural.totalMs)}
+                  </p>
                 </button>
                 <div className="mt-3 flex justify-end">
                   <Button
@@ -1273,21 +1349,27 @@ function ProjectDetail({
   project,
   now,
   actualNow,
-  observedMs,
-  onObservedMsChange,
+  showOverviewScale,
+  onToggleOverviewScale,
+  scaleViewMode,
+  onScaleViewModeChange,
   activePage,
 }: {
   project: LifeProject;
   now: Date;
   actualNow: Date;
-  observedMs: number | null;
-  onObservedMsChange: (value: number | null) => void;
+  showOverviewScale: boolean;
+  onToggleOverviewScale: (value: boolean) => void;
+  scaleViewMode: ScaleViewMode;
+  onScaleViewModeChange: (value: ScaleViewMode) => void;
   activePage: AppPage;
 }) {
   const updateProject = useLifeStore((state) => state.updateProject);
   const createStage = useLifeStore((state) => state.createStage);
   const resetDemoData = useLifeStore((state) => state.resetDemoData);
   const clearAllData = useLifeStore((state) => state.clearAllData);
+  const backendStatus = useLifeStore((state) => state.backendStatus);
+  const backendStorageInfo = useLifeStore((state) => state.backendStorageInfo);
   const progress = computeProjectProgress(project, now);
   const milestones = project.stages.reduce(
     (sum, stage) => sum + stage.milestones.length,
@@ -1324,20 +1406,28 @@ function ProjectDetail({
           </div>
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-[1.2fr_1fr]">
-          <DualProgressBar natural={progress.natural} effective={progress.effective} />
-          <div className="grid grid-cols-2 gap-3">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatBadge
+            icon={<Clock3 size={14} />}
+            label="时间轴总时长"
+            value={formatDuration(progress.natural.totalMs)}
+          />
+          <StatBadge
+            icon={<Clock3 size={14} />}
+            label="已走过"
+            value={formatDuration(progress.natural.elapsedMs)}
+          />
+          <StatBadge
+            icon={<PauseCircle size={14} />}
+            label="自主排除"
+            value={formatDuration(progress.excludedTotalMs)}
+          />
+          <div className="grid grid-cols-2 gap-3 sm:col-span-2 xl:col-span-1">
             <StatBadge
-              icon={<Clock3 size={14} />}
-              label="日历总时长"
-              value={formatDuration(progress.natural.totalMs)}
+              icon={<MilestoneIcon size={14} />}
+              label="里程碑"
+              value={milestones}
             />
-            <StatBadge
-              icon={<PauseCircle size={14} />}
-              label="自主排除"
-              value={formatDuration(progress.excludedTotalMs)}
-            />
-            <StatBadge icon={<MilestoneIcon size={14} />} label="里程碑" value={milestones} />
             <StatBadge icon={<Circle size={14} />} label="排除时间段" value={exclusions} />
           </div>
         </div>
@@ -1353,15 +1443,15 @@ function ProjectDetail({
 
       <ObservationControl
         actualNow={actualNow}
-        observedMs={observedMs}
+        scaleViewMode={scaleViewMode}
+        onScaleViewModeChange={onScaleViewModeChange}
         project={project}
-        onChange={onObservedMsChange}
+        showOverviewScale={showOverviewScale}
+        onToggleOverviewScale={onToggleOverviewScale}
       />
 
       {activePage === "overview" && (
         <>
-          <ProgressExplanation />
-
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <details>
               <summary className="cursor-pointer text-base font-semibold text-slate-950">
@@ -1383,7 +1473,14 @@ function ProjectDetail({
         </>
       )}
 
-      {activePage === "scale" && <ProjectLongScale project={project} now={now} />}
+      {activePage === "scale" && (
+        <ProjectLongScale
+          project={project}
+          now={now}
+          scaleViewMode={scaleViewMode}
+          showOverviewScale={showOverviewScale}
+        />
+      )}
 
       {activePage === "stages" && (
         <>
@@ -1419,13 +1516,18 @@ function ProjectDetail({
 
             {project.stages.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-500">
-                这条时间轴还没有阶段。添加一个阶段后，就能看到日历进度与净进度。
+                这条时间轴还没有阶段。添加一个阶段后，就能看到完整时间结构。
               </div>
             ) : (
               [...project.stages]
                 .sort((a, b) => a.startDate.localeCompare(b.startDate))
                 .map((stage) => (
-                  <StageCard key={stage.id} project={project} stage={stage} now={now} />
+                  <StageCard
+                    key={stage.id}
+                    now={now}
+                    project={project}
+                    stage={stage}
+                  />
                 ))
             )}
           </section>
@@ -1436,8 +1538,47 @@ function ProjectDetail({
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-xl font-semibold text-slate-950">数据</h2>
           <p className="mt-2 text-sm text-slate-500">
-            数据会优先尝试同步到本地后端；后端不可用时，会继续保存在浏览器本地。
+            数据会优先同步到后端 JSON 文件；后端不可用时，会继续保存在浏览器本地。
           </p>
+          <div className="mt-5 grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="font-medium text-slate-700">后端状态</span>
+              <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">
+                {backendStatus === "synced"
+                  ? "已连接并同步"
+                  : backendStatus === "syncing"
+                    ? "同步中"
+                    : backendStatus === "unavailable"
+                      ? "未连接"
+                      : "待同步"}
+              </span>
+            </div>
+            {backendStorageInfo ? (
+              <>
+                <div>
+                  <span className="font-medium text-slate-700">数据文件：</span>
+                  <span className="break-all text-slate-600">
+                    {backendStorageInfo.dataFile}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-medium text-slate-700">备份文件：</span>
+                  <span className="break-all text-slate-600">
+                    {backendStorageInfo.backupFile}
+                  </span>
+                </div>
+                <div className="text-slate-600">
+                  {backendStorageInfo.exists
+                    ? `文件大小 ${backendStorageInfo.size} bytes，最后修改 ${backendStorageInfo.modifiedAt ?? "未知"}`
+                    : "后端文件尚未创建，第一次保存后会自动生成。"}
+                </div>
+              </>
+            ) : (
+              <p className="text-slate-600">
+                暂未拿到后端存储信息。请确认 `npm run dev:server` 已启动。
+              </p>
+            )}
+          </div>
           <div className="mt-5 flex flex-wrap gap-2">
             <Button variant="secondary" onClick={resetDemoData}>
               <RotateCcw size={16} />
@@ -1526,34 +1667,35 @@ function StageCard({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-[1.1fr_1fr]">
-        <DualProgressBar natural={progress.natural} effective={progress.effective} />
-        <div className="grid grid-cols-2 gap-3">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:col-span-2 xl:col-span-2 xl:grid-cols-2">
           <StatBadge
             icon={<Clock3 size={14} />}
-            label="自然已过"
-            value={formatDuration(progress.natural.elapsedMs)}
+            label="阶段总时长"
+            value={formatDuration(progress.natural.totalMs)}
           />
           <StatBadge
             icon={<Clock3 size={14} />}
-            label="自然剩余"
+            label="已走过"
+            value={formatDuration(progress.natural.elapsedMs)}
+          />
+        </div>
+        <div className="grid gap-3 sm:col-span-2 xl:col-span-2 xl:grid-cols-2">
+          <StatBadge
+            icon={<Clock3 size={14} />}
+            label="剩余"
             value={formatDuration(progress.natural.remainingMs)}
           />
           <StatBadge
             icon={<PauseCircle size={14} />}
-            label="有效已过"
-            value={formatDuration(progress.effective.elapsedMs)}
-          />
-          <StatBadge
-            icon={<PauseCircle size={14} />}
-            label="有效剩余"
-            value={formatDuration(progress.effective.remainingMs)}
+            label="排除时长"
+            value={formatDuration(progress.excludedTotalMs)}
           />
         </div>
       </div>
 
       <div className="mt-5">
-        <Timeline stage={stage} now={now} />
+        <Timeline now={now} stage={stage} />
       </div>
 
       {progress.warnings.length > 0 && (
@@ -1637,7 +1779,7 @@ function ExcludedPeriodSection({
         <h4 className="font-semibold text-slate-950">排除时间段</h4>
         <span className="text-sm text-slate-500">{periods.length} 个</span>
       </div>
-      <p className="mt-1 text-sm text-slate-500">自主排除的时间会影响净进度。</p>
+      <p className="mt-1 text-sm text-slate-500">这些时间段会在时间轴上单独标出来。</p>
 
       <details className="mt-4">
         <summary className="cursor-pointer text-sm font-medium text-slate-800">
@@ -1805,7 +1947,8 @@ function EmptyMain() {
 export default function App() {
   const actualNow = useNow(60_000);
   const [activePage, setActivePage] = useState<AppPage>("overview");
-  const [observedMs, setObservedMs] = useState<number | null>(null);
+  const [scaleViewMode, setScaleViewMode] = useState<ScaleViewMode>("full");
+  const [showOverviewScale, setShowOverviewScale] = useState(true);
   const projects = useLifeStore((state) => state.projects);
   const selectedProjectId = useLifeStore((state) => state.selectedProjectId);
   const storageWarning = useLifeStore((state) => state.storageWarning);
@@ -1815,12 +1958,7 @@ export default function App() {
     () => projects.find((project) => project.id === selectedProjectId) ?? projects[0],
     [projects, selectedProjectId]
   );
-  const selectedRange = selectedProject ? getProjectRange(selectedProject) : null;
-  const clampedObservedMs =
-    observedMs !== null && selectedRange
-      ? clamp(observedMs, selectedRange.startMs, selectedRange.endMs - DAY_MS)
-      : observedMs;
-  const now = clampedObservedMs !== null ? new Date(clampedObservedMs) : actualNow;
+  const now = actualNow;
 
   useEffect(() => {
     void syncWithBackend();
@@ -1861,11 +1999,13 @@ export default function App() {
         {selectedProject ? (
           <ProjectDetail
             activePage={activePage}
-            project={selectedProject}
-            now={now}
             actualNow={actualNow}
-            observedMs={clampedObservedMs}
-            onObservedMsChange={setObservedMs}
+            now={now}
+            onToggleOverviewScale={setShowOverviewScale}
+            onScaleViewModeChange={setScaleViewMode}
+            project={selectedProject}
+            scaleViewMode={scaleViewMode}
+            showOverviewScale={showOverviewScale}
           />
         ) : (
           <EmptyMain />

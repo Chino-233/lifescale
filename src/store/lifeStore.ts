@@ -12,7 +12,9 @@ import {
   type StoredLifeData,
 } from "../storage/lifeStorage";
 import {
+  type BackendStorageInfo,
   clearLifeDataOnServer,
+  loadBackendStorageInfo,
   loadLifeDataFromServer,
   saveLifeDataToServer,
 } from "../storage/lifeApi";
@@ -51,6 +53,7 @@ type LifeState = {
   selectedProjectId?: string;
   storageWarning?: string;
   backendStatus: "idle" | "syncing" | "synced" | "unavailable";
+  backendStorageInfo?: BackendStorageInfo;
   createProject: (input: ProjectInput) => void;
   updateProject: (projectId: string, patch: Partial<ProjectInput>) => void;
   deleteProject: (projectId: string) => void;
@@ -176,6 +179,7 @@ export const useLifeStore = create<LifeState>((set) => ({
   selectedProjectId: initialSelectedProjectId,
   storageWarning: loaded.warning,
   backendStatus: "idle",
+  backendStorageInfo: undefined,
 
   createProject: (input) =>
     set((state) => {
@@ -373,6 +377,7 @@ export const useLifeStore = create<LifeState>((set) => ({
 
     try {
       const serverData = await loadLifeDataFromServer();
+      const backendStorageInfo = await loadBackendStorageInfo();
 
       set((state) => {
         if (serverData.projects.length === 0 && state.projects.length > 0) {
@@ -381,11 +386,14 @@ export const useLifeStore = create<LifeState>((set) => ({
             projects: state.projects,
           };
           void saveLifeDataToServer(data).catch(() => undefined);
-          return { backendStatus: "synced" };
+          void loadBackendStorageInfo().then((info) =>
+            useLifeStore.setState({ backendStorageInfo: info })
+          );
+          return { backendStatus: "synced", backendStorageInfo };
         }
 
         if (serverData.projects.length === 0) {
-          return { backendStatus: "synced" };
+          return { backendStatus: "synced", backendStorageInfo };
         }
 
         saveLifeData(serverData);
@@ -399,6 +407,7 @@ export const useLifeStore = create<LifeState>((set) => ({
               ? state.selectedProjectId
               : serverData.projects[0]?.id,
           backendStatus: "synced",
+          backendStorageInfo,
         };
       });
     } catch {

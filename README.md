@@ -31,6 +31,30 @@ npm run dev
 
 前端会通过 Vite proxy 访问 `http://localhost:3001/api`。
 
+后端数据会持久化写入：
+
+```txt
+data/lifescale.json
+```
+
+每次保存会先写临时文件，再原子替换正式文件，并保留上一版备份：
+
+```txt
+data/lifescale.json.bak
+```
+
+也可以用环境变量指定保存位置：
+
+```bash
+DATA_FILE=/absolute/path/lifescale.json npm run dev:server
+```
+
+或者指定目录：
+
+```bash
+DATA_DIR=/absolute/path npm run dev:server
+```
+
 ## Docker 启动
 
 ```bash
@@ -44,6 +68,12 @@ http://localhost:3001
 ```
 
 后端数据会保存在 Docker volume `lifescale-data` 中。
+
+容器内路径是：
+
+```txt
+/data/lifescale.json
+```
 
 ## 常用检查
 
