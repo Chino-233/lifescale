@@ -76,6 +76,10 @@ type MilestoneFormValue = {
 };
 
 type AppPage = "overview" | "scale" | "stages" | "data";
+type ProjectRange = {
+  startMs: number;
+  endMs: number;
+};
 
 function percent(value: number, digits = 1): string {
   return `${clamp(value, 0, 100).toFixed(digits)}%`;
@@ -91,6 +95,25 @@ function todayLabel(now: Date): string {
 
 function compactDate(dateString: string): string {
   return format(parseLocalDate(dateString), "yyyy.MM.dd");
+}
+
+function formatMsDate(ms: number): string {
+  return format(new Date(ms), "yyyy-MM-dd");
+}
+
+function getProjectRange(project: LifeProject): ProjectRange | null {
+  const intervals = project.stages
+    .map((stage) => toInterval(stage.startDate, stage.endDate))
+    .filter((interval): interval is TimeInterval => interval !== null);
+
+  if (intervals.length === 0) {
+    return null;
+  }
+
+  return {
+    startMs: Math.min(...intervals.map((interval) => interval.startMs)),
+    endMs: Math.max(...intervals.map((interval) => interval.endMs)),
+  };
 }
 
 function statusLabel(status: StageStatus): string {
@@ -194,6 +217,69 @@ function TextArea({
         onChange={(event) => onChange(event.target.value)}
       />
     </label>
+  );
+}
+
+function ObservationControl({
+  project,
+  actualNow,
+  observedMs,
+  onChange,
+}: {
+  project: LifeProject;
+  actualNow: Date;
+  observedMs: number | null;
+  onChange: (value: number | null) => void;
+}) {
+  const range = getProjectRange(project);
+
+  if (!range) {
+    return null;
+  }
+
+  const activeMs = observedMs ?? actualNow.getTime();
+  const sliderValue = clamp(activeMs, range.startMs, range.endMs - DAY_MS);
+  const isManual = observedMs !== null;
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-slate-950">观察日期</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            拖动滑杆可以把「现在」移动到任意日期，用来回看或预演阶段进度。
+          </p>
+        </div>
+        <div className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700">
+          {formatMsDate(sliderValue)}
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3">
+        <input
+          aria-label="拖动观察日期"
+          className="w-full accent-slate-900"
+          max={range.endMs - DAY_MS}
+          min={range.startMs}
+          step={DAY_MS}
+          type="range"
+          value={sliderValue}
+          onChange={(event) => onChange(Number(event.target.value))}
+        />
+        <div className="flex items-center justify-between text-xs text-slate-500">
+          <span>{formatMsDate(range.startMs)}</span>
+          <span>{formatMsDate(range.endMs - DAY_MS)}</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => onChange(actualNow.getTime())}>
+            <Clock3 size={16} />
+            跳到今天
+          </Button>
+          <Button disabled={!isManual} variant="ghost" onClick={() => onChange(null)}>
+            使用实时日期
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -319,7 +405,15 @@ function PageNav({
 function ProgressExplanation() {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-xl font-semibold text-slate-950">进度说明</h2>
+      <h2 className="text-xl font-semibold text-slate-950">概念说明</h2>
+      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+        <h3 className="font-semibold text-slate-950">时间轴和阶段</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          一个人的一生当然可以是一条固定时间轴。这里的「时间轴」是一个容器：
+          你可以只建一条「我的一生」，也可以另外建「东京生活」「职业转型」这种专题时间轴。
+          「阶段」就是这条时间轴里面的一段时间，比如大学、第一份工作、恢复期。
+        </p>
+      </div>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div className="rounded-md border border-blue-100 bg-blue-50 p-4">
           <h3 className="font-semibold text-blue-950">日历进度（未扣除）</h3>
@@ -362,7 +456,7 @@ function ProjectForm({
     event.preventDefault();
 
     if (!value.name.trim()) {
-      setError("项目名称不能为空。");
+      setError("时间轴名称不能为空。");
       return;
     }
 
@@ -378,7 +472,7 @@ function ProjectForm({
     <form className="grid gap-3" onSubmit={submit}>
       <TextInput
         required
-        label="项目名称"
+        label="时间轴名称"
         value={value.name}
         onChange={(name) => setValue((current) => ({ ...current, name }))}
       />
@@ -772,41 +866,46 @@ function Timeline({ stage, now }: { stage: LifeStage; now: Date }) {
           现在
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-3 rounded-full border-2 border-white bg-slate-700 ring-1 ring-slate-400" />
+          <span className="h-4 w-0.5 bg-slate-700" />
           里程碑
         </span>
       </div>
 
       <div className="relative h-24">
-        <div className="absolute inset-x-0 top-10 h-8 rounded-md border border-slate-300 bg-slate-200" />
-        <div
-          className="absolute left-0 top-10 h-8 rounded-l-md bg-blue-500/70"
-          style={{ width: `${elapsedPercent}%` }}
-          title="已经过的日历时间"
-        />
-        {activeExclusions.map((interval) => {
-          const left = clamp(
-            ((interval.startMs - stageInterval.startMs) / stageTotal) * 100,
-            0,
-            100
-          );
-          const width = clamp((getDuration(interval) / stageTotal) * 100, 0, 100 - left);
-          return (
-            <div
-              key={`${interval.startMs}-${interval.endMs}`}
-              className="hatched absolute top-10 h-8"
-              style={{ left: `${left}%`, width: `${width}%` }}
-              title="自主排除的时间"
-            />
-          );
-        })}
+        <div className="absolute inset-x-0 top-10 h-8 overflow-hidden rounded-md border border-slate-300 bg-slate-200">
+          <div
+            className="absolute inset-y-0 left-0 bg-blue-500/70"
+            style={{ width: `${elapsedPercent}%` }}
+            title="已经过的日历时间"
+          />
+          {activeExclusions.map((interval) => {
+            const left = clamp(
+              ((interval.startMs - stageInterval.startMs) / stageTotal) * 100,
+              0,
+              100
+            );
+            const width = clamp((getDuration(interval) / stageTotal) * 100, 0, 100 - left);
+            return (
+              <div
+                key={`${interval.startMs}-${interval.endMs}`}
+                className="hatched absolute inset-y-0"
+                style={{ left: `${left}%`, width: `${width}%` }}
+                title="自主排除的时间"
+              />
+            );
+          })}
+        </div>
         {nowInsideStage && (
           <div
             className="absolute top-4 z-10 h-16 w-0.5 bg-red-600"
             style={{ left: `${nowPercent}%` }}
             title="当前时间"
           >
-            <span className="absolute left-2 top-0 whitespace-nowrap rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white">
+            <span
+              className={`absolute top-0 whitespace-nowrap rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white ${
+                nowPercent > 84 ? "right-2" : "left-2"
+              }`}
+            >
               现在
             </span>
           </div>
@@ -814,12 +913,21 @@ function Timeline({ stage, now }: { stage: LifeStage; now: Date }) {
         {stage.milestones.map((milestone) => {
           const dateMs = parseLocalDate(milestone.date).getTime();
           const left = clamp(((dateMs - stageInterval.startMs) / stageTotal) * 100, 0, 100);
+          const alignRight = left > 78;
           return (
-            <div key={milestone.id} className="absolute top-14" style={{ left: `${left}%` }}>
-              <div
-                className="h-4 w-4 -translate-x-1/2 rounded-full border-2 border-white bg-slate-700 shadow ring-1 ring-slate-400"
-                title={`${milestone.name} · ${milestone.date}`}
-              />
+            <div
+              key={milestone.id}
+              className="absolute top-3 z-20 h-16 w-0.5 bg-slate-700"
+              style={{ left: `${left}%` }}
+              title={`${milestone.name} · ${milestone.date}`}
+            >
+              <span
+                className={`absolute top-0 max-w-36 truncate rounded bg-white px-1.5 py-0.5 text-xs font-medium text-slate-700 shadow-sm ring-1 ring-slate-200 ${
+                  alignRight ? "right-2" : "left-2"
+                }`}
+              >
+                {milestone.name}
+              </span>
             </div>
           );
         })}
@@ -849,9 +957,9 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
   if (stageRows.length === 0) {
     return (
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-xl font-semibold text-slate-950">全项目长刻度</h2>
+        <h2 className="text-xl font-semibold text-slate-950">整条时间轴</h2>
         <p className="mt-2 text-sm text-slate-500">
-          添加有效阶段后，这里会显示一条横向展开的完整时间刻度。
+          添加有效阶段后，这里会显示一条适配页面宽度的完整时间刻度。
         </p>
       </section>
     );
@@ -903,7 +1011,7 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-slate-950">全项目长刻度</h2>
+          <h2 className="text-xl font-semibold text-slate-950">整条时间轴</h2>
           <p className="mt-1 text-sm text-slate-500">
             整体时间会压缩到当前页面宽度；阶段名称、起点和终点固定显示在左侧。
           </p>
@@ -917,7 +1025,7 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
       <div className="mt-5 grid gap-3">
         <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[220px_1fr]">
           <div>
-            <p className="text-sm font-semibold text-slate-900">项目总刻度</p>
+            <p className="text-sm font-semibold text-slate-900">时间轴总刻度</p>
             <p className="mt-1 text-xs text-slate-500">{totalDays} 天</p>
           </div>
           <div className="relative h-20">
@@ -996,7 +1104,32 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
                 </div>
 
                 <div className="relative h-20">
-                  <div className="absolute inset-x-0 top-8 h-6 rounded-full bg-slate-100" />
+                  <div className="absolute inset-x-0 top-8 h-6 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="absolute inset-y-0 rounded-full shadow-sm ring-1 ring-black/5"
+                      style={{
+                        left: `${left}%`,
+                        width: `${width}%`,
+                        backgroundColor: stage.color ?? "#2563eb",
+                      }}
+                      title={`${stage.name}: ${stage.startDate} 至 ${stage.endDate}`}
+                    />
+                    {activeExclusions.map((excluded) => {
+                      const excludedLeft = percentFromMs(excluded.startMs);
+                      const excludedRight = percentFromMs(excluded.endMs);
+                      return (
+                        <div
+                          key={`${excluded.startMs}-${excluded.endMs}`}
+                          className="hatched absolute inset-y-0 ring-1 ring-slate-300"
+                          style={{
+                            left: `${excludedLeft}%`,
+                            width: `${Math.max(1, excludedRight - excludedLeft)}%`,
+                          }}
+                          title="排除时间段"
+                        />
+                      );
+                    })}
+                  </div>
                   {showNow && (
                     <div
                       className="absolute top-1 z-10 h-16 border-l-2 border-red-600"
@@ -1004,39 +1137,24 @@ function ProjectLongScale({ project, now }: { project: LifeProject; now: Date })
                       title="当前时间"
                     />
                   )}
-                  <div
-                    className="absolute top-8 h-6 rounded-full shadow-sm ring-1 ring-black/5"
-                    style={{
-                      left: `${left}%`,
-                      width: `${width}%`,
-                      backgroundColor: stage.color ?? "#2563eb",
-                    }}
-                    title={`${stage.name}: ${stage.startDate} 至 ${stage.endDate}`}
-                  />
-                  {activeExclusions.map((excluded) => {
-                    const excludedLeft = percentFromMs(excluded.startMs);
-                    const excludedRight = percentFromMs(excluded.endMs);
-                    return (
-                      <div
-                        key={`${excluded.startMs}-${excluded.endMs}`}
-                        className="hatched absolute top-8 h-6 ring-1 ring-slate-300"
-                        style={{
-                          left: `${excludedLeft}%`,
-                          width: `${Math.max(1, excludedRight - excludedLeft)}%`,
-                        }}
-                        title="排除时间段"
-                      />
-                    );
-                  })}
                   {stage.milestones.map((milestone) => {
                     const left = percentFromMs(parseLocalDate(milestone.date).getTime());
+                    const alignRight = left > 78;
                     return (
                       <div
                         key={milestone.id}
-                        className="absolute top-9 h-4 w-4 -translate-x-1/2 rounded-full border-2 border-white bg-slate-800 shadow ring-1 ring-slate-400"
+                        className="absolute top-1 h-16 w-0.5 bg-slate-700"
                         style={{ left: `${left}%` }}
                         title={`${milestone.name} · ${milestone.date}`}
-                      />
+                      >
+                        <span
+                          className={`absolute top-0 max-w-32 truncate rounded bg-white px-1.5 py-0.5 text-xs font-medium text-slate-700 shadow-sm ring-1 ring-slate-200 ${
+                            alignRight ? "right-2" : "left-2"
+                          }`}
+                        >
+                          {milestone.name}
+                        </span>
+                      </div>
                     );
                   })}
                   <div className="absolute inset-x-0 bottom-0 flex justify-between text-xs text-slate-500">
@@ -1069,22 +1187,24 @@ function ProjectList({
   return (
     <aside className="grid gap-5">
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-base font-semibold text-slate-950">新建项目</h2>
-        <p className="mt-1 text-sm text-slate-500">给一段生命主题一个温和的容器。</p>
+        <h2 className="text-base font-semibold text-slate-950">新建时间轴</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          可以只维护一条「我的一生」，也可以为某段主题单独建一条时间轴。
+        </p>
         <div className="mt-4">
-          <ProjectForm submitLabel="新建项目" onSubmit={createProject} />
+          <ProjectForm submitLabel="新建时间轴" onSubmit={createProject} />
         </div>
       </section>
 
       <section className="grid gap-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-slate-950">项目</h2>
+          <h2 className="text-base font-semibold text-slate-950">时间轴</h2>
           <span className="text-sm text-slate-500">{projects.length} 个</span>
         </div>
 
         {projects.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500">
-            新建一个项目，开始整理你的阶段、暂停期与里程碑。
+            新建一条时间轴，开始整理你的阶段、暂停期与里程碑。
           </div>
         ) : (
           projects.map((project) => {
@@ -1128,10 +1248,10 @@ function ProjectList({
                 </button>
                 <div className="mt-3 flex justify-end">
                   <Button
-                    title="删除项目"
+                    title="删除时间轴"
                     variant="danger"
                     onClick={() => {
-                      if (window.confirm(`删除项目「${project.name}」？`)) {
+                      if (window.confirm(`删除时间轴「${project.name}」？`)) {
                         deleteProject(project.id);
                       }
                     }}
@@ -1152,10 +1272,16 @@ function ProjectList({
 function ProjectDetail({
   project,
   now,
+  actualNow,
+  observedMs,
+  onObservedMsChange,
   activePage,
 }: {
   project: LifeProject;
   now: Date;
+  actualNow: Date;
+  observedMs: number | null;
+  onObservedMsChange: (value: number | null) => void;
   activePage: AppPage;
 }) {
   const updateProject = useLifeStore((state) => state.updateProject);
@@ -1225,6 +1351,13 @@ function ProjectDetail({
         )}
       </section>
 
+      <ObservationControl
+        actualNow={actualNow}
+        observedMs={observedMs}
+        project={project}
+        onChange={onObservedMsChange}
+      />
+
       {activePage === "overview" && (
         <>
           <ProgressExplanation />
@@ -1232,7 +1365,7 @@ function ProjectDetail({
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <details>
               <summary className="cursor-pointer text-base font-semibold text-slate-950">
-                编辑项目信息
+                编辑时间轴信息
               </summary>
               <div className="mt-4">
                 <ProjectForm
@@ -1241,7 +1374,7 @@ function ProjectDetail({
                     name: project.name,
                     description: project.description ?? "",
                   }}
-                  submitLabel="保存项目"
+                  submitLabel="保存时间轴"
                   onSubmit={(value) => updateProject(project.id, value)}
                 />
               </div>
@@ -1286,7 +1419,7 @@ function ProjectDetail({
 
             {project.stages.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-500">
-                这个项目还没有阶段。添加一个阶段后，就能看到日历进度与净进度。
+                这条时间轴还没有阶段。添加一个阶段后，就能看到日历进度与净进度。
               </div>
             ) : (
               [...project.stages]
@@ -1655,9 +1788,9 @@ function EmptyMain() {
 
   return (
     <main className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center shadow-sm">
-      <h1 className="text-2xl font-semibold text-slate-950">还没有项目</h1>
+      <h1 className="text-2xl font-semibold text-slate-950">还没有时间轴</h1>
       <p className="mx-auto mt-2 max-w-xl text-slate-500">
-        你可以新建自己的第一个项目，也可以先载入示例数据看看人生刻度如何工作。
+        你可以新建自己的第一条人生时间轴，也可以先载入示例数据看看人生刻度如何工作。
       </p>
       <div className="mt-5 flex justify-center">
         <Button onClick={resetDemoData}>
@@ -1670,8 +1803,9 @@ function EmptyMain() {
 }
 
 export default function App() {
-  const now = useNow(60_000);
+  const actualNow = useNow(60_000);
   const [activePage, setActivePage] = useState<AppPage>("overview");
+  const [observedMs, setObservedMs] = useState<number | null>(null);
   const projects = useLifeStore((state) => state.projects);
   const selectedProjectId = useLifeStore((state) => state.selectedProjectId);
   const storageWarning = useLifeStore((state) => state.storageWarning);
@@ -1681,6 +1815,12 @@ export default function App() {
     () => projects.find((project) => project.id === selectedProjectId) ?? projects[0],
     [projects, selectedProjectId]
   );
+  const selectedRange = selectedProject ? getProjectRange(selectedProject) : null;
+  const clampedObservedMs =
+    observedMs !== null && selectedRange
+      ? clamp(observedMs, selectedRange.startMs, selectedRange.endMs - DAY_MS)
+      : observedMs;
+  const now = clampedObservedMs !== null ? new Date(clampedObservedMs) : actualNow;
 
   useEffect(() => {
     void syncWithBackend();
@@ -1723,6 +1863,9 @@ export default function App() {
             activePage={activePage}
             project={selectedProject}
             now={now}
+            actualNow={actualNow}
+            observedMs={clampedObservedMs}
+            onObservedMsChange={setObservedMs}
           />
         ) : (
           <EmptyMain />
