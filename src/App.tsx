@@ -1959,15 +1959,6 @@ function ProjectDetail({
         )}
       </section>
 
-      <ObservationControl
-        actualNow={actualNow}
-        scaleViewMode={scaleViewMode}
-        onScaleViewModeChange={onScaleViewModeChange}
-        project={project}
-        showOverviewScale={showOverviewScale}
-        onToggleOverviewScale={onToggleOverviewScale}
-      />
-
       {activePage === "overview" && (
         <>
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -1992,12 +1983,22 @@ function ProjectDetail({
       )}
 
       {activePage === "scale" && (
-        <ProjectLongScale
-          project={project}
-          now={now}
-          scaleViewMode={scaleViewMode}
-          showOverviewScale={showOverviewScale}
-        />
+        <>
+          <ObservationControl
+            actualNow={actualNow}
+            scaleViewMode={scaleViewMode}
+            onScaleViewModeChange={onScaleViewModeChange}
+            project={project}
+            showOverviewScale={showOverviewScale}
+            onToggleOverviewScale={onToggleOverviewScale}
+          />
+          <ProjectLongScale
+            project={project}
+            now={now}
+            scaleViewMode={scaleViewMode}
+            showOverviewScale={showOverviewScale}
+          />
+        </>
       )}
 
       {activePage === "stages" && (
