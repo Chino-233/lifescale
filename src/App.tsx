@@ -75,7 +75,7 @@ type MilestoneFormValue = {
 };
 
 type AppPage = "overview" | "scale" | "stages" | "data";
-type ScaleViewMode = "full" | "now";
+type ScaleViewMode = "full" | "now" | "overlay_rows" | "overlay_single";
 type ProjectRange = {
   startMs: number;
   endMs: number;
@@ -263,6 +263,14 @@ function ObservationControl({
     scaleViewMode === "now"
       ? clamp(actualNow.getTime(), range.startMs + DAY_MS, range.endMs)
       : range.endMs;
+  const modeDescription =
+    scaleViewMode === "now"
+      ? "现在模式会把“现在”之后的内容全部隐藏，当前时间会贴到最右侧。"
+      : scaleViewMode === "overlay_rows"
+        ? "叠加模式会把所有阶段收进同一张大刻度图里，共用一套横向时间坐标。"
+        : scaleViewMode === "overlay_single"
+          ? "单线模式会把所有阶段压到同一条时间线上，直接看重叠和接力关系。"
+        : "完整模式会按阶段分开展示，保留完整的时间范围。";
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -305,12 +313,32 @@ function ObservationControl({
             >
               现在模式
             </button>
+            <button
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                scaleViewMode === "overlay_rows"
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+              type="button"
+              onClick={() => onScaleViewModeChange("overlay_rows")}
+            >
+              叠层模式
+            </button>
+            <button
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                scaleViewMode === "overlay_single"
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+              type="button"
+              onClick={() => onScaleViewModeChange("overlay_single")}
+            >
+              单线模式
+            </button>
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-slate-500">
-            现在模式会把“现在”之后的内容全部隐藏，当前时间会贴到最右侧。
-          </p>
+          <p className="text-sm text-slate-500">{modeDescription}</p>
           <label className="inline-flex cursor-pointer items-center gap-3 text-sm font-medium text-slate-700">
             <button
               aria-pressed={showOverviewScale}
@@ -1027,6 +1055,10 @@ function ProjectLongScale({
     const interval = Math.ceil(ticks.length / 8);
     return index % interval === 0 || index === ticks.length - 1;
   });
+  const overlayTrackTop = 44;
+  const overlayTrackHeight = 20;
+  const overlayFooterHeight = 34;
+  const overlayChartHeight = overlayTrackTop + overlayTrackHeight + overlayFooterHeight;
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -1095,7 +1127,352 @@ function ProjectLongScale({
             </div>
           )}
 
-          {visibleStageRows.map(({ stage, interval, visibleInterval }) => {
+          {scaleViewMode === "overlay_single" ? (
+            <div className="rounded-lg bg-white p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">阶段单线总览</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    所有阶段都压在同一条时间线上，按同一套总时间坐标显示。
+                  </p>
+                </div>
+                <div className="text-xs text-slate-500">
+                  {visibleStageRows.length} 个阶段
+                </div>
+              </div>
+
+              <div
+                className="relative mt-4 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 px-3"
+                style={{ height: `${overlayChartHeight}px` }}
+              >
+                <div
+                  className="absolute inset-x-3 top-0"
+                  style={{ height: `${overlayChartHeight - overlayFooterHeight}px` }}
+                >
+                  {visibleTicks.map((tick) => (
+                    <div
+                      key={`overlay-${tick.toISOString()}`}
+                      className="absolute inset-y-0 border-l border-slate-200"
+                      style={{ left: `${percentFromMs(tick.getTime())}%` }}
+                    />
+                  ))}
+                </div>
+                {visibleTicks.map((tick) => {
+                  const left = percentFromMs(tick.getTime());
+                  const alignRight = left > 88;
+                  return (
+                    <div
+                      key={`overlay-label-${tick.toISOString()}`}
+                      className="absolute top-2 h-4"
+                      style={{ left: `${left}%` }}
+                    >
+                      <span
+                        className={`absolute top-0 whitespace-nowrap text-xs text-slate-500 ${
+                          alignRight ? "right-1" : "left-1"
+                        }`}
+                      >
+                        {format(tick, useYearTicks ? "yyyy" : "yyyy.MM")}
+                      </span>
+                    </div>
+                  );
+                })}
+                {showRangeMarker && (
+                  <div
+                    className="absolute bottom-7 top-1 z-20 border-l-2 border-red-600"
+                    style={{ left: `${rangeMarkerPercent}%` }}
+                    title={rangeMarkerTitle}
+                  >
+                    <span
+                      className={`absolute top-0 whitespace-nowrap rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white ${
+                        rangeMarkerAlignRight ? "right-2" : "left-2"
+                      }`}
+                    >
+                      {rangeMarkerLabel}
+                    </span>
+                  </div>
+                )}
+                <div
+                  className="absolute inset-x-3 rounded-full bg-slate-200"
+                  style={{ top: `${overlayTrackTop}px`, height: `${overlayTrackHeight}px` }}
+                />
+                {visibleStageRows.map(({ stage, interval, visibleInterval }) => {
+                  const left = percentFromMs(visibleInterval.startMs);
+                  const right = percentFromMs(visibleInterval.endMs);
+                  const width = Math.max(1, right - left);
+                  const clipsLeft = visibleInterval.startMs > interval.startMs;
+                  const clipsRight = visibleInterval.endMs < interval.endMs;
+                  const stageRadiusClass = segmentRadiusClass({
+                    clipLeft: clipsLeft,
+                    clipRight: clipsRight,
+                  });
+                  const stageProgress = computeStageProgress(stage, now);
+                  const elapsedWidth = Math.max(
+                    0,
+                    (width * clamp(stageProgress.natural.percentage, 0, 100)) / 100
+                  );
+                  const activeExclusions = mergeIntervals(
+                    stage.excludedPeriods
+                      .filter((period) => period.countAsExcluded)
+                      .map((period) => toInterval(period.startDate, period.endDate))
+                      .filter((excluded): excluded is TimeInterval => excluded !== null)
+                      .map((excluded) => clipInterval(excluded, visibleInterval))
+                      .filter((excluded): excluded is TimeInterval => excluded !== null)
+                  );
+
+                  return (
+                    <div key={stage.id}>
+                      <div
+                        className={`absolute z-10 ring-1 ring-black/5 ${stageRadiusClass}`}
+                        style={{
+                          top: `${overlayTrackTop}px`,
+                          left: `${left}%`,
+                          width: `${width}%`,
+                          height: `${overlayTrackHeight}px`,
+                          backgroundColor: `${stage.color ?? "#2563eb"}22`,
+                        }}
+                        title={`${stage.name}: ${stage.startDate} 至 ${stage.endDate}`}
+                      />
+                      <div
+                        className={`absolute z-10 shadow-sm ${stageRadiusClass}`}
+                        style={{
+                          top: `${overlayTrackTop}px`,
+                          left: `${left}%`,
+                          width: `${elapsedWidth}%`,
+                          height: `${overlayTrackHeight}px`,
+                          backgroundColor: stage.color ?? "#2563eb",
+                        }}
+                        title={`${stage.name} 已经过的时间`}
+                      />
+                      {activeExclusions.map((excluded) => {
+                        const excludedLeft = percentFromMs(excluded.startMs);
+                        const excludedRight = percentFromMs(excluded.endMs);
+                        const exclusionRadiusClass = segmentRadiusClass({
+                          clipLeft: excluded.startMs > interval.startMs,
+                          clipRight: excluded.endMs < interval.endMs,
+                        });
+                        return (
+                          <div
+                            key={`${stage.id}-${excluded.startMs}-${excluded.endMs}`}
+                            className={`hatched absolute z-20 ring-1 ring-slate-300 ${exclusionRadiusClass}`}
+                            style={{
+                              top: `${overlayTrackTop}px`,
+                              left: `${excludedLeft}%`,
+                              width: `${Math.max(1, excludedRight - excludedLeft)}%`,
+                              height: `${overlayTrackHeight}px`,
+                            }}
+                            title="排除时间段"
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+                <div className="absolute inset-x-3 bottom-2 flex justify-between text-xs text-slate-500">
+                  <span>{format(new Date(startMs), "yyyy.MM.dd")}</span>
+                  <span>{format(new Date(endMs - DAY_MS), "yyyy.MM.dd")}</span>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {visibleStageRows.map(({ stage, interval }) => {
+                  const stageProgress = computeStageProgress(stage, now);
+                  return (
+                    <div
+                      key={stage.id}
+                      className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full"
+                          style={{ backgroundColor: stage.color ?? "#2563eb" }}
+                        />
+                        <span className="font-medium text-slate-900">{stage.name}</span>
+                      </div>
+                      <div className="mt-1">
+                        {compactDate(stage.startDate)} - {compactDate(stage.endDate)}
+                      </div>
+                      <div className="mt-0.5">
+                        {formatDuration(interval.endMs - interval.startMs)} ·{" "}
+                        {statusLabel(stageProgress.status)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : scaleViewMode === "overlay_rows" ? (
+            <div className="grid gap-3 rounded-lg bg-white p-4 md:grid-cols-[220px_1fr]">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-900">阶段叠层图</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  每一行都是一个阶段，但它们都投在同一条总时间坐标上。
+                </p>
+                <div className="mt-4 grid gap-3">
+                  {visibleStageRows.map(({ stage, interval }) => {
+                    const stageProgress = computeStageProgress(stage, now);
+                    return (
+                      <div key={stage.id} className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-3 w-3 rounded-full"
+                            style={{ backgroundColor: stage.color ?? "#2563eb" }}
+                          />
+                          <p className="truncate text-sm font-medium text-slate-900">
+                            {stage.name}
+                          </p>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {compactDate(stage.startDate)} - {compactDate(stage.endDate)}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {formatDuration(interval.endMs - interval.startMs)} ·{" "}
+                          {statusLabel(stageProgress.status)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div
+                className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50 px-3"
+                style={{
+                  height: `${28 + visibleStageRows.length * 16 + Math.max(0, visibleStageRows.length - 1) * 12 + 28}px`,
+                }}
+              >
+                <div
+                  className="absolute inset-x-3 top-0"
+                  style={{
+                    height: `${28 + visibleStageRows.length * 16 + Math.max(0, visibleStageRows.length - 1) * 12}px`,
+                  }}
+                >
+                  {visibleTicks.map((tick) => (
+                    <div
+                      key={`overlay-rows-${tick.toISOString()}`}
+                      className="absolute inset-y-0 border-l border-slate-200"
+                      style={{ left: `${percentFromMs(tick.getTime())}%` }}
+                    />
+                  ))}
+                </div>
+                {visibleTicks.map((tick) => {
+                  const left = percentFromMs(tick.getTime());
+                  const alignRight = left > 88;
+                  return (
+                    <div
+                      key={`overlay-rows-label-${tick.toISOString()}`}
+                      className="absolute top-2 h-4"
+                      style={{ left: `${left}%` }}
+                    >
+                      <span
+                        className={`absolute top-0 whitespace-nowrap text-xs text-slate-500 ${
+                          alignRight ? "right-1" : "left-1"
+                        }`}
+                      >
+                        {format(tick, useYearTicks ? "yyyy" : "yyyy.MM")}
+                      </span>
+                    </div>
+                  );
+                })}
+                {showRangeMarker && (
+                  <div
+                    className="absolute bottom-7 top-1 z-10 border-l-2 border-red-600"
+                    style={{ left: `${rangeMarkerPercent}%` }}
+                    title={rangeMarkerTitle}
+                  >
+                    <span
+                      className={`absolute top-0 whitespace-nowrap rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white ${
+                        rangeMarkerAlignRight ? "right-2" : "left-2"
+                      }`}
+                    >
+                      {rangeMarkerLabel}
+                    </span>
+                  </div>
+                )}
+                {visibleStageRows.map(({ stage, interval, visibleInterval }, index) => {
+                  const top = 28 + index * (16 + 12);
+                  const left = percentFromMs(visibleInterval.startMs);
+                  const right = percentFromMs(visibleInterval.endMs);
+                  const width = Math.max(1, right - left);
+                  const clipsLeft = visibleInterval.startMs > interval.startMs;
+                  const clipsRight = visibleInterval.endMs < interval.endMs;
+                  const stageRadiusClass = segmentRadiusClass({
+                    clipLeft: clipsLeft,
+                    clipRight: clipsRight,
+                  });
+                  const stageProgress = computeStageProgress(stage, now);
+                  const elapsedWidth = Math.max(
+                    0,
+                    (width * clamp(stageProgress.natural.percentage, 0, 100)) / 100
+                  );
+                  const activeExclusions = mergeIntervals(
+                    stage.excludedPeriods
+                      .filter((period) => period.countAsExcluded)
+                      .map((period) => toInterval(period.startDate, period.endDate))
+                      .filter((excluded): excluded is TimeInterval => excluded !== null)
+                      .map((excluded) => clipInterval(excluded, visibleInterval))
+                      .filter((excluded): excluded is TimeInterval => excluded !== null)
+                  );
+
+                  return (
+                    <div key={stage.id}>
+                      <div
+                        className="absolute inset-x-3 rounded-full bg-slate-100"
+                        style={{ top: `${top}px`, height: "16px" }}
+                      />
+                      <div
+                        className={`absolute ring-1 ring-black/5 ${stageRadiusClass}`}
+                        style={{
+                          top: `${top}px`,
+                          left: `${left}%`,
+                          width: `${width}%`,
+                          height: "16px",
+                          backgroundColor: `${stage.color ?? "#2563eb"}22`,
+                        }}
+                        title={`${stage.name}: ${stage.startDate} 至 ${stage.endDate}`}
+                      />
+                      <div
+                        className={`absolute shadow-sm ${stageRadiusClass}`}
+                        style={{
+                          top: `${top}px`,
+                          left: `${left}%`,
+                          width: `${elapsedWidth}%`,
+                          height: "16px",
+                          backgroundColor: stage.color ?? "#2563eb",
+                        }}
+                        title={`${stage.name} 已经过的时间`}
+                      />
+                      {activeExclusions.map((excluded) => {
+                        const excludedLeft = percentFromMs(excluded.startMs);
+                        const excludedRight = percentFromMs(excluded.endMs);
+                        const exclusionRadiusClass = segmentRadiusClass({
+                          clipLeft: excluded.startMs > interval.startMs,
+                          clipRight: excluded.endMs < interval.endMs,
+                        });
+                        return (
+                          <div
+                            key={`${stage.id}-${excluded.startMs}-${excluded.endMs}`}
+                            className={`hatched absolute ring-1 ring-slate-300 ${exclusionRadiusClass}`}
+                            style={{
+                              top: `${top}px`,
+                              left: `${excludedLeft}%`,
+                              width: `${Math.max(1, excludedRight - excludedLeft)}%`,
+                              height: "16px",
+                            }}
+                            title="排除时间段"
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+                <div className="absolute inset-x-3 bottom-2 flex justify-between text-xs text-slate-500">
+                  <span>{format(new Date(startMs), "yyyy.MM.dd")}</span>
+                  <span>{format(new Date(endMs - DAY_MS), "yyyy.MM.dd")}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            visibleStageRows.map(({ stage, interval, visibleInterval }) => {
             const left = percentFromMs(visibleInterval.startMs);
             const right = percentFromMs(visibleInterval.endMs);
             const width = Math.max(1, right - left);
@@ -1229,11 +1606,11 @@ function ProjectLongScale({
                         >
                           {milestone.name}
                         </span>
-                      </div>
-                    );
-                  })}
-                  <p className="absolute left-0 bottom-0 text-xs text-slate-500">
-                    {compactDate(stage.startDate)}
+                    </div>
+                  );
+                })}
+                <p className="absolute left-0 bottom-0 text-xs text-slate-500">
+                  {compactDate(stage.startDate)}
                   </p>
                   <p className="absolute right-0 bottom-0 text-xs text-slate-500">
                     {compactDate(stage.endDate)}
@@ -1241,7 +1618,8 @@ function ProjectLongScale({
                 </div>
               </div>
             );
-          })}
+          })
+          )}
         </div>
       </div>
     </section>
