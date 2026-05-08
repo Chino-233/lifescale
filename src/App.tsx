@@ -11,6 +11,7 @@ import {
   Plus,
   RotateCcw,
   Ruler,
+  Save,
   Trash2,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -18,6 +19,7 @@ import { zhCN } from "date-fns/locale";
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -95,6 +97,50 @@ function compactDate(dateString: string): string {
 
 function formatMsDate(ms: number): string {
   return format(new Date(ms), "yyyy-MM-dd");
+}
+
+function parseDateParts(value: string): {
+  year: string;
+  month: string;
+  day: string;
+} {
+  const [year = "", month = "", day = ""] = value.split("-");
+  return { year, month, day };
+}
+
+function composeDateParts(parts: {
+  year: string;
+  month: string;
+  day: string;
+}): string {
+  if (!parts.year && !parts.month && !parts.day) {
+    return "";
+  }
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function subtractIntervals(base: TimeInterval, cuts: TimeInterval[]): TimeInterval[] {
+  const mergedCuts = mergeIntervals(
+    cuts
+      .map((cut) => clipInterval(cut, base))
+      .filter((cut): cut is TimeInterval => cut !== null)
+  );
+  const segments: TimeInterval[] = [];
+  let cursor = base.startMs;
+
+  for (const cut of mergedCuts) {
+    if (cut.startMs > cursor) {
+      segments.push({ startMs: cursor, endMs: cut.startMs });
+    }
+    cursor = Math.max(cursor, cut.endMs);
+  }
+
+  if (cursor < base.endMs) {
+    segments.push({ startMs: cursor, endMs: base.endMs });
+  }
+
+  return segments;
 }
 
 function segmentRadiusClass({
@@ -213,6 +259,107 @@ function TextInput({
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
+    </label>
+  );
+}
+
+function DateInput({
+  label,
+  value,
+  onChange,
+  required,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+}) {
+  const [parts, setParts] = useState(() => parseDateParts(value));
+  const monthRef = useRef<HTMLInputElement | null>(null);
+  const dayRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const nextParts = parseDateParts(value);
+    const currentValue = composeDateParts(parts);
+
+    if (value !== currentValue) {
+      setParts(nextParts);
+    }
+  }, [parts, value]);
+
+  function updatePart(part: "year" | "month" | "day", raw: string) {
+    const maxLength = part === "year" ? 4 : 2;
+    const digits = raw.replace(/\D/g, "").slice(0, maxLength);
+    const nextParts = { ...parts, [part]: digits };
+    setParts(nextParts);
+    onChange(composeDateParts(nextParts));
+
+    if (part === "year" && digits.length === 4) {
+      monthRef.current?.focus();
+      monthRef.current?.select();
+    }
+
+    if (part === "month" && digits.length === 2) {
+      dayRef.current?.focus();
+      dayRef.current?.select();
+    }
+  }
+
+  function handleBackspace(part: "year" | "month" | "day", currentValue: string) {
+    if (currentValue) {
+      return;
+    }
+
+    if (part === "day") {
+      monthRef.current?.focus();
+      monthRef.current?.select();
+    }
+  }
+
+  return (
+    <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+      <span>{label}</span>
+      <div className="flex min-h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-slate-900 shadow-sm">
+        <input
+          required={required}
+          aria-label={`${label} 年`}
+          className="w-14 bg-transparent text-center outline-none"
+          inputMode="numeric"
+          maxLength={4}
+          placeholder="YYYY"
+          value={parts.year}
+          onChange={(event) => updatePart("year", event.target.value)}
+        />
+        <span className="text-slate-400">-</span>
+        <input
+          ref={monthRef}
+          required={required}
+          aria-label={`${label} 月`}
+          className="w-9 bg-transparent text-center outline-none"
+          inputMode="numeric"
+          maxLength={2}
+          placeholder="MM"
+          value={parts.month}
+          onChange={(event) => updatePart("month", event.target.value)}
+        />
+        <span className="text-slate-400">-</span>
+        <input
+          ref={dayRef}
+          required={required}
+          aria-label={`${label} 日`}
+          className="w-9 bg-transparent text-center outline-none"
+          inputMode="numeric"
+          maxLength={2}
+          placeholder="DD"
+          value={parts.day}
+          onChange={(event) => updatePart("day", event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Backspace") {
+              handleBackspace("day", parts.day);
+            }
+          }}
+        />
+      </div>
     </label>
   );
 }
@@ -579,17 +726,15 @@ function StageForm({
         </label>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <TextInput
+        <DateInput
           required
           label="开始日期"
-          type="date"
           value={value.startDate}
           onChange={(startDate) => setValue((current) => ({ ...current, startDate }))}
         />
-        <TextInput
+        <DateInput
           required
           label="结束日期"
-          type="date"
           value={value.endDate}
           onChange={(endDate) => setValue((current) => ({ ...current, endDate }))}
         />
@@ -606,7 +751,7 @@ function StageForm({
       />
       {error && <p className="text-sm text-red-700">{error}</p>}
       <Button type="submit">
-        <Plus size={16} />
+        {initialValue ? <Save size={16} /> : <Plus size={16} />}
         {submitLabel}
       </Button>
     </form>
@@ -690,17 +835,15 @@ function ExcludedPeriodForm({
         onChange={(name) => setValue((current) => ({ ...current, name }))}
       />
       <div className="grid gap-3 sm:grid-cols-2">
-        <TextInput
+        <DateInput
           required
           label="开始日期"
-          type="date"
           value={value.startDate}
           onChange={(startDate) => setValue((current) => ({ ...current, startDate }))}
         />
-        <TextInput
+        <DateInput
           required
           label="结束日期"
-          type="date"
           value={value.endDate}
           onChange={(endDate) => setValue((current) => ({ ...current, endDate }))}
         />
@@ -731,7 +874,7 @@ function ExcludedPeriodForm({
       )}
       {error && <p className="text-sm text-red-700">{error}</p>}
       <Button type="submit">
-        <Plus size={16} />
+        <Save size={16} />
         {submitLabel}
       </Button>
     </form>
@@ -788,10 +931,9 @@ function MilestoneForm({
         value={value.name}
         onChange={(name) => setValue((current) => ({ ...current, name }))}
       />
-      <TextInput
+      <DateInput
         required
         label="日期"
-        type="date"
         value={value.date}
         onChange={(date) => setValue((current) => ({ ...current, date }))}
       />
@@ -807,7 +949,7 @@ function MilestoneForm({
       )}
       {error && <p className="text-sm text-red-700">{error}</p>}
       <Button type="submit">
-        <Plus size={16} />
+        <Save size={16} />
         {submitLabel}
       </Button>
     </form>
@@ -1196,20 +1338,6 @@ function ProjectLongScale({
                   style={{ top: `${overlayTrackTop}px`, height: `${overlayTrackHeight}px` }}
                 />
                 {visibleStageRows.map(({ stage, interval, visibleInterval }) => {
-                  const left = percentFromMs(visibleInterval.startMs);
-                  const right = percentFromMs(visibleInterval.endMs);
-                  const width = Math.max(1, right - left);
-                  const clipsLeft = visibleInterval.startMs > interval.startMs;
-                  const clipsRight = visibleInterval.endMs < interval.endMs;
-                  const stageRadiusClass = segmentRadiusClass({
-                    clipLeft: clipsLeft,
-                    clipRight: clipsRight,
-                  });
-                  const stageProgress = computeStageProgress(stage, now);
-                  const elapsedWidth = Math.max(
-                    0,
-                    (width * clamp(stageProgress.natural.percentage, 0, 100)) / 100
-                  );
                   const activeExclusions = mergeIntervals(
                     stage.excludedPeriods
                       .filter((period) => period.countAsExcluded)
@@ -1218,49 +1346,61 @@ function ProjectLongScale({
                       .map((excluded) => clipInterval(excluded, visibleInterval))
                       .filter((excluded): excluded is TimeInterval => excluded !== null)
                   );
+                  const visibleSegments = subtractIntervals(visibleInterval, activeExclusions);
+                  const elapsedVisibleInterval = clipInterval(
+                    {
+                      startMs: interval.startMs,
+                      endMs: clamp(now.getTime(), interval.startMs, interval.endMs),
+                    },
+                    visibleInterval
+                  );
+                  const elapsedSegments = elapsedVisibleInterval
+                    ? subtractIntervals(elapsedVisibleInterval, activeExclusions)
+                    : [];
 
                   return (
                     <div key={stage.id}>
-                      <div
-                        className={`absolute z-10 ring-1 ring-black/5 ${stageRadiusClass}`}
-                        style={{
-                          top: `${overlayTrackTop}px`,
-                          left: `${left}%`,
-                          width: `${width}%`,
-                          height: `${overlayTrackHeight}px`,
-                          backgroundColor: `${stage.color ?? "#2563eb"}22`,
-                        }}
-                        title={`${stage.name}: ${stage.startDate} 至 ${stage.endDate}`}
-                      />
-                      <div
-                        className={`absolute z-10 shadow-sm ${stageRadiusClass}`}
-                        style={{
-                          top: `${overlayTrackTop}px`,
-                          left: `${left}%`,
-                          width: `${elapsedWidth}%`,
-                          height: `${overlayTrackHeight}px`,
-                          backgroundColor: stage.color ?? "#2563eb",
-                        }}
-                        title={`${stage.name} 已经过的时间`}
-                      />
-                      {activeExclusions.map((excluded) => {
-                        const excludedLeft = percentFromMs(excluded.startMs);
-                        const excludedRight = percentFromMs(excluded.endMs);
-                        const exclusionRadiusClass = segmentRadiusClass({
-                          clipLeft: excluded.startMs > interval.startMs,
-                          clipRight: excluded.endMs < interval.endMs,
+                      {visibleSegments.map((segment) => {
+                        const left = percentFromMs(segment.startMs);
+                        const right = percentFromMs(segment.endMs);
+                        const segmentClassName = segmentRadiusClass({
+                          clipLeft: segment.startMs > interval.startMs,
+                          clipRight: segment.endMs < interval.endMs,
                         });
                         return (
                           <div
-                            key={`${stage.id}-${excluded.startMs}-${excluded.endMs}`}
-                            className={`hatched absolute z-20 ring-1 ring-slate-300 ${exclusionRadiusClass}`}
+                            key={`${stage.id}-visible-${segment.startMs}-${segment.endMs}`}
+                            className={`absolute z-10 ring-1 ring-black/5 ${segmentClassName}`}
                             style={{
                               top: `${overlayTrackTop}px`,
-                              left: `${excludedLeft}%`,
-                              width: `${Math.max(1, excludedRight - excludedLeft)}%`,
+                              left: `${left}%`,
+                              width: `${Math.max(1, right - left)}%`,
                               height: `${overlayTrackHeight}px`,
+                              backgroundColor: `${stage.color ?? "#2563eb"}22`,
                             }}
-                            title="排除时间段"
+                            title={`${stage.name}: ${stage.startDate} 至 ${stage.endDate}`}
+                          />
+                        );
+                      })}
+                      {elapsedSegments.map((segment) => {
+                        const left = percentFromMs(segment.startMs);
+                        const right = percentFromMs(segment.endMs);
+                        const segmentClassName = segmentRadiusClass({
+                          clipLeft: segment.startMs > interval.startMs,
+                          clipRight: segment.endMs < interval.endMs,
+                        });
+                        return (
+                          <div
+                            key={`${stage.id}-elapsed-${segment.startMs}-${segment.endMs}`}
+                            className={`absolute z-10 shadow-sm ${segmentClassName}`}
+                            style={{
+                              top: `${overlayTrackTop}px`,
+                              left: `${left}%`,
+                              width: `${Math.max(1, right - left)}%`,
+                              height: `${overlayTrackHeight}px`,
+                              backgroundColor: stage.color ?? "#2563eb",
+                            }}
+                            title={`${stage.name} 已经过的时间`}
                           />
                         );
                       })}
@@ -2233,22 +2373,39 @@ function MilestoneSection({
   onUpdate: (milestone: Milestone, value: MilestoneFormValue) => void;
   onDelete: (milestone: Milestone) => void;
 }) {
+  const [showCreateForm, setShowCreateForm] = useState(false);
+
   return (
     <section className="rounded-md border border-slate-200 p-4">
       <div className="flex items-center justify-between gap-3">
-        <h4 className="font-semibold text-slate-950">里程碑</h4>
-        <span className="text-sm text-slate-500">{milestones.length} 个</span>
+        <div className="flex items-center gap-3">
+          <h4 className="font-semibold text-slate-950">里程碑</h4>
+          <span className="text-sm text-slate-500">{milestones.length} 个</span>
+        </div>
+        <button
+          aria-label={showCreateForm ? "收起新增里程碑表单" : "新增里程碑"}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-900 text-white transition hover:bg-slate-700"
+          title={showCreateForm ? "收起" : "新增里程碑"}
+          type="button"
+          onClick={() => setShowCreateForm((current) => !current)}
+        >
+          <Plus size={16} />
+        </button>
       </div>
       <p className="mt-1 text-sm text-slate-500">把阶段里的关键事件放在时间线上。</p>
 
-      <details className="mt-4">
-        <summary className="cursor-pointer text-sm font-medium text-slate-800">
-          添加里程碑
-        </summary>
+      {showCreateForm && (
         <div className="mt-3">
-          <MilestoneForm stage={stage} submitLabel="添加里程碑" onSubmit={onCreate} />
+          <MilestoneForm
+            stage={stage}
+            submitLabel="保存里程碑"
+            onSubmit={(value) => {
+              onCreate(value);
+              setShowCreateForm(false);
+            }}
+          />
         </div>
-      </details>
+      )}
 
       <div className="mt-4 grid gap-3">
         {milestones.length === 0 ? (
